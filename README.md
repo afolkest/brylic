@@ -11,4 +11,4 @@ contains various adjustments to avoid aliasing caused by boundary effects and
 further algorithmic adjustments near the boundary for dials letting you construct 
 aesthetically appealing "halos" around the boundaries. 
 
-This repo is heavily vibecoded and currently completely unstable so approach with caution.
+This repo will be heavily vibecoded by me going forward and currently completely unstable so approach with caution.
