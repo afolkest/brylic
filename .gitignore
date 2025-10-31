@@ -14,3 +14,4 @@ target/
 
 # Virtual environments
 .venv
+rlic-speedups
