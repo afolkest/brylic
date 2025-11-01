@@ -2,11 +2,12 @@ use crate::boundaries::{Boundary, BoundaryPair, BoundarySet};
 use either::Either;
 use num_traits::{abs, signum, Float, Signed};
 use numpy::borrow::{PyReadonlyArray1, PyReadonlyArray2};
-use numpy::ndarray::{Array2, ArrayView1, ArrayView2};
+use numpy::ndarray::{s, Array2, ArrayView1, ArrayView2};
 use numpy::{PyArray2, ToPyArray};
-use pyo3::types::PyModuleMethods;
-use pyo3::{pyfunction, pymodule, types::PyModule, wrap_pyfunction, Bound, PyResult, Python};
+use pyo3::{pymodule, types::PyModule, Bound, PyResult, Python};
 use std::ops::{AddAssign, Mul, Neg};
+use std::sync::Mutex;
+use std::thread;
 
 #[derive(Clone)]
 enum UVMode {
@@ -23,6 +24,7 @@ impl UVMode {
     }
 }
 
+#[derive(Clone)]
 struct UVField<'a, T> {
     u: ArrayView2<'a, T>,
     v: ArrayView2<'a, T>,
@@ -66,6 +68,7 @@ impl PixelCoordinates {
     }
 }
 mod boundaries {
+    #[derive(Clone, Copy)]
     pub enum Boundary {
         Closed,
         Periodic,
@@ -80,6 +83,7 @@ mod boundaries {
         }
     }
 
+    #[derive(Clone, Copy)]
     pub struct BoundaryPair {
         pub left: Boundary,
         pub right: Boundary,
@@ -93,6 +97,7 @@ mod boundaries {
         }
     }
 
+    #[derive(Clone, Copy)]
     pub struct BoundarySet {
         pub x: BoundaryPair,
         pub y: BoundaryPair,
@@ -145,7 +150,10 @@ mod test_pixel_select {
     }
 }
 
-trait AtLeastF32: Float + From<f32> + Signed + AddAssign<<Self as Mul>::Output> {}
+trait AtLeastF32:
+    Float + From<f32> + Signed + AddAssign<<Self as Mul>::Output> + Send + Sync
+{
+}
 impl AtLeastF32 for f32 {}
 impl AtLeastF32 for f64 {}
 
@@ -289,15 +297,15 @@ enum Direction {
 }
 
 #[inline(always)]
-fn convole_single_pixel<T: AtLeastF32>(
-    pixel_value: &mut T,
+fn accumulate_direction<T: AtLeastF32>(
     starting_point: &PixelCoordinates,
     uv: &UVField<T>,
     kernel: &ArrayView1<T>,
     input: &ArrayView2<T>,
     boundaries: &BoundarySet,
     direction: &Direction,
-) {
+    blocked: Option<&ArrayView2<bool>>,
+) -> (T, T) {
     let mut coords: PixelCoordinates = starting_point.clone();
     let mut pix_frac = PixelFraction {
         x: 0.5.into(),
@@ -310,6 +318,8 @@ fn convole_single_pixel<T: AtLeastF32>(
     };
 
     let kmid = kernel.len() / 2;
+    let mut acc: T = 0.0.into();
+    let mut used_sum: T = 0.0.into();
     let range = match direction {
         Direction::Forward => Either::Right((kmid + 1)..kernel.len()),
         Direction::Backward => Either::Left((0..kmid).rev()),
@@ -337,7 +347,200 @@ fn convole_single_pixel<T: AtLeastF32>(
             Direction::Backward => -p,
         };
         advance(&mp, &mut coords, &mut pix_frac, boundaries);
-        *pixel_value = kernel[[k]].mul_add(select_pixel(input, &coords), *pixel_value);
+        // If a blocked mask is provided, stop when entering a blocked pixel.
+        if let Some(b) = blocked {
+            if b[[coords.y, coords.x]] {
+                break;
+            }
+        }
+        let w = kernel[[k]];
+        acc = w.mul_add(select_pixel(input, &coords), acc);
+        used_sum += w;
+    }
+    (acc, used_sum)
+}
+
+fn compute_pixel<T: AtLeastF32>(
+    uv: &UVField<T>,
+    kernel: &ArrayView1<T>,
+    input: &ArrayView2<T>,
+    boundaries: &BoundarySet,
+    blocked: Option<&ArrayView2<bool>>,
+    dims: &ImageDimensions,
+    kmid: usize,
+    full_sum: T,
+    edge_gain_strength: T,
+    edge_gain_power: T,
+    y: usize,
+    x: usize,
+) -> T {
+    let mut value = kernel[[kmid]].mul_add(input[[y, x]], 0.0.into());
+    let mut used_sum: T = kernel[[kmid]];
+
+    let starting_point = PixelCoordinates {
+        x,
+        y,
+        dimensions: dims.clone(),
+    };
+
+    let (acc_fwd, used_fwd) = accumulate_direction(
+        &starting_point,
+        uv,
+        kernel,
+        input,
+        boundaries,
+        &Direction::Forward,
+        blocked,
+    );
+    value += acc_fwd;
+    used_sum += used_fwd;
+
+    let (acc_bwd, used_bwd) = accumulate_direction(
+        &starting_point,
+        uv,
+        kernel,
+        input,
+        boundaries,
+        &Direction::Backward,
+        blocked,
+    );
+    value += acc_bwd;
+    used_sum += used_bwd;
+
+    if let Some(_) = blocked {
+        if used_sum > 0.0.into() && used_sum < full_sum {
+            value = (full_sum / used_sum) * value;
+        }
+        if edge_gain_strength > 0.0.into() && full_sum > 0.0.into() {
+            let mut t = (full_sum - used_sum) / full_sum;
+            if t < 0.0.into() {
+                t = 0.0.into();
+            }
+            if t > 1.0.into() {
+                t = 1.0.into();
+            }
+            let gain = <T as num_traits::One>::one() + edge_gain_strength * t.powf(edge_gain_power);
+            value = gain * value;
+        }
+    }
+
+    value
+}
+
+#[derive(Clone, Copy)]
+struct TileSpec {
+    y0: usize,
+    y1: usize,
+    x0: usize,
+    x1: usize,
+}
+
+fn build_tile_specs(
+    height: usize,
+    width: usize,
+    tile_shape: Option<(usize, usize)>,
+) -> Vec<TileSpec> {
+    let (tile_h, tile_w) = tile_shape.unwrap_or((height, width));
+    let tile_h = tile_h.max(1).min(height);
+    let tile_w = tile_w.max(1).min(width);
+
+    let mut tiles = Vec::new();
+    let mut y0 = 0;
+    while y0 < height {
+        let y1 = (y0 + tile_h).min(height);
+        let mut x0 = 0;
+        while x0 < width {
+            let x1 = (x0 + tile_w).min(width);
+            tiles.push(TileSpec { y0, y1, x0, x1 });
+            x0 = x1;
+        }
+        y0 = y1;
+    }
+    tiles
+}
+
+fn convolve_tiles<T: AtLeastF32>(
+    uv: &UVField<T>,
+    kernel: &ArrayView1<T>,
+    boundaries: &BoundarySet,
+    input: &ArrayView2<T>,
+    blocked: Option<ArrayView2<bool>>,
+    edge_gain_strength: T,
+    edge_gain_power: T,
+    tile_shape: Option<(usize, usize)>,
+    num_threads: Option<usize>,
+    output: &mut Array2<T>,
+) {
+    let dims = ImageDimensions {
+        x: input.shape()[1],
+        y: input.shape()[0],
+    };
+    let tiles = build_tile_specs(dims.y, dims.x, tile_shape);
+    let kmid = kernel.len() / 2;
+    let full_sum: T = kernel.iter().cloned().fold(0.0.into(), |acc, v| acc + v);
+
+    let uv = uv.clone();
+    let kernel = kernel.clone();
+    let input = input.clone();
+    let boundaries = *boundaries;
+    let blocked_owned = blocked.map(|view| view.to_owned());
+
+    let worker_count = num_threads
+        .unwrap_or_else(|| thread::available_parallelism().map(|n| n.get()).unwrap_or(1))
+        .max(1);
+    let worker_count = worker_count.min(tiles.len().max(1));
+    let chunk_size = (tiles.len() + worker_count - 1) / worker_count;
+
+    let results = Mutex::new(Vec::with_capacity(tiles.len()));
+
+    thread::scope(|scope| {
+        for chunk in tiles.chunks(chunk_size.max(1)) {
+            let chunk = chunk;
+            let uv_ref = &uv;
+            let kernel_ref = &kernel;
+            let input_ref = &input;
+            let boundaries_ref = boundaries;
+            let dims_ref = dims.clone();
+            let blocked_ref = &blocked_owned;
+            let results_ref = &results;
+            scope.spawn(move || {
+                let blocked_view = blocked_ref.as_ref().map(|arr| arr.view());
+                let mut local = Vec::with_capacity(chunk.len());
+                for tile in chunk.iter().copied() {
+                    let mut tile_out = Array2::<T>::zeros((tile.y1 - tile.y0, tile.x1 - tile.x0));
+                    for (local_y, global_y) in (tile.y0..tile.y1).enumerate() {
+                        for (local_x, global_x) in (tile.x0..tile.x1).enumerate() {
+                            tile_out[[local_y, local_x]] = compute_pixel(
+                                uv_ref,
+                                kernel_ref,
+                                input_ref,
+                                &boundaries_ref,
+                                blocked_view.as_ref(),
+                                &dims_ref,
+                                kmid,
+                                full_sum,
+                                edge_gain_strength,
+                                edge_gain_power,
+                                global_y,
+                                global_x,
+                            );
+                        }
+                    }
+                    local.push((tile, tile_out));
+                }
+                if !local.is_empty() {
+                    let mut guard = results_ref.lock().unwrap();
+                    guard.extend(local);
+                }
+            });
+        }
+    });
+
+    let results = results.into_inner().unwrap();
+    for (tile, tile_out) in results {
+        output
+            .slice_mut(s![tile.y0..tile.y1, tile.x0..tile.x1])
+            .assign(&tile_out);
     }
 }
 
@@ -347,40 +550,37 @@ fn convolve<'py, T: AtLeastF32>(
     boundaries: &BoundarySet,
     input: ArrayView2<T>,
     output: &mut Array2<T>,
+    blocked: Option<&ArrayView2<bool>>,
+    edge_gain_strength: T,
+    edge_gain_power: T,
 ) {
     let dims = ImageDimensions {
         x: uv.u.shape()[1],
         y: uv.u.shape()[0],
     };
+    let uv = uv.clone();
+    let kernel = kernel.clone();
+    let input = input.clone();
+    let blocked = blocked;
+    let full_sum: T = kernel.iter().cloned().fold(0.0.into(), |acc, v| acc + v);
     let kmid = kernel.len() / 2;
+    let boundaries = *boundaries;
 
     for i in 0..dims.y {
         for j in 0..dims.x {
-            let pixel_value = &mut output[[i, j]];
-            *pixel_value = kernel[[kmid]].mul_add(input[[i, j]], *pixel_value);
-            let starting_point = PixelCoordinates {
-                x: j,
-                y: i,
-                dimensions: dims.clone(),
-            };
-            convole_single_pixel(
-                pixel_value,
-                &starting_point,
-                uv,
+            output[[i, j]] = compute_pixel(
+                &uv,
                 &kernel,
                 &input,
-                boundaries,
-                &Direction::Forward,
-            );
-
-            convole_single_pixel(
-                pixel_value,
-                &starting_point,
-                uv,
-                &kernel,
-                &input,
-                boundaries,
-                &Direction::Backward,
+                &boundaries,
+                blocked,
+                &dims,
+                kmid,
+                full_sum,
+                edge_gain_strength,
+                edge_gain_power,
+                i,
+                j,
             );
         }
     }
@@ -393,6 +593,12 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
     kernel: PyReadonlyArray1<'py, T>,
     boundaries: BoundarySet,
     iterations: i64,
+    blocked: Option<PyReadonlyArray2<'py, bool>>,
+    edge_gain_strength: T,
+    edge_gain_power: T,
+    tile_shape: Option<(usize, usize)>,
+    _overlap: Option<usize>,
+    num_threads: Option<usize>,
 ) -> Bound<'py, PyArray2<T>> {
     let uv = UVField {
         u: uv.0.as_array(),
@@ -404,10 +610,53 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
     let mut input =
         Array2::from_shape_vec(texture.raw_dim(), texture.iter().cloned().collect()).unwrap();
     let mut output = Array2::<T>::zeros(texture.raw_dim());
+    let blocked_owned = blocked.map(|b| b.as_array().to_owned());
+    let dims = ImageDimensions {
+        x: input.shape()[1],
+        y: input.shape()[0],
+    };
+    let derived_tile = if let Some(shape) = tile_shape {
+        Some(shape)
+    } else if let Some(threads) = num_threads {
+        if threads > 1 {
+            let stripe_h = (dims.y + threads - 1) / threads;
+            Some((stripe_h.max(1), dims.x))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let mut it_count = 0;
     while it_count < iterations {
-        convolve(&uv, kernel, &boundaries, input.view(), &mut output);
+        let blocked_view = blocked_owned.as_ref().map(|arr| arr.view());
+
+        if let Some(shape) = derived_tile {
+            convolve_tiles(
+                &uv,
+                &kernel,
+                &boundaries,
+                &input.view(),
+                blocked_view,
+                edge_gain_strength,
+                edge_gain_power,
+                Some(shape),
+                num_threads,
+                &mut output,
+            );
+        } else {
+            convolve(
+                &uv,
+                kernel.clone(),
+                &boundaries,
+                input.view(),
+                &mut output,
+                blocked_view.as_ref(),
+                edge_gain_strength,
+                edge_gain_power,
+            );
+        }
         it_count += 1;
         if it_count < iterations {
             input.assign(&output);
@@ -423,8 +672,10 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
 /// import the module.
 #[pymodule(gil_used = false)]
 fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
-    #[pyfunction]
-    fn convolve_f32<'py>(
+    #[pyfn(m)]
+    #[pyo3(name = "convolve_f32")]
+    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
+    fn convolve_f32_py<'py>(
         py: Python<'py>,
         texture: PyReadonlyArray2<'py, f32>,
         uv: (
@@ -435,14 +686,34 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
         kernel: PyReadonlyArray1<'py, f32>,
         boundaries: ((String, String), (String, String)),
         iterations: i64,
+        blocked: Option<PyReadonlyArray2<'py, bool>>,
+        edge_gain_strength: f32,
+        edge_gain_power: f32,
+        tile_shape: Option<(usize, usize)>,
+        overlap: Option<usize>,
+        num_threads: Option<usize>,
     ) -> Bound<'py, PyArray2<f32>> {
         let boundaries = BoundarySet::new(boundaries);
-        convolve_iteratively(py, texture, uv, kernel, boundaries, iterations)
+        convolve_iteratively(
+            py,
+            texture,
+            uv,
+            kernel,
+            boundaries,
+            iterations,
+            blocked,
+            edge_gain_strength,
+            edge_gain_power,
+            tile_shape,
+            overlap,
+            num_threads,
+        )
     }
-    m.add_function(wrap_pyfunction!(convolve_f32, m)?)?;
 
-    #[pyfunction]
-    fn convolve_f64<'py>(
+    #[pyfn(m)]
+    #[pyo3(name = "convolve_f64")]
+    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
+    fn convolve_f64_py<'py>(
         py: Python<'py>,
         texture: PyReadonlyArray2<'py, f64>,
         uv: (
@@ -453,11 +724,28 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
         kernel: PyReadonlyArray1<'py, f64>,
         boundaries: ((String, String), (String, String)),
         iterations: i64,
+        blocked: Option<PyReadonlyArray2<'py, bool>>,
+        edge_gain_strength: f64,
+        edge_gain_power: f64,
+        tile_shape: Option<(usize, usize)>,
+        overlap: Option<usize>,
+        num_threads: Option<usize>,
     ) -> Bound<'py, PyArray2<f64>> {
         let boundaries = BoundarySet::new(boundaries);
-        convolve_iteratively(py, texture, uv, kernel, boundaries, iterations)
+        convolve_iteratively(
+            py,
+            texture,
+            uv,
+            kernel,
+            boundaries,
+            iterations,
+            blocked,
+            edge_gain_strength,
+            edge_gain_power,
+            tile_shape,
+            overlap,
+            num_threads,
+        )
     }
-    m.add_function(wrap_pyfunction!(convolve_f64, m)?)?;
-
     Ok(())
 }

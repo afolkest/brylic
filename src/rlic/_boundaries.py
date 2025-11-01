@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Boundary handling helpers copied from vanilla rLIC for experimentation."""
+
 __all__ = [
     "COMBO_ALLOWED_BOUNDS",
     "COMBO_DISALLOWED_BOUNDS",
@@ -13,17 +15,17 @@ from typing import TYPE_CHECKING
 
 if sys.version_info >= (3, 11):
     from typing import assert_never  # pyright: ignore[reportUnreachable]
-else:
+else:  # pragma: no cover - Python <3.11 compatibility path
     from exceptiongroup import ExceptionGroup  # pyright: ignore[reportUnreachable]
     from typing_extensions import assert_never  # pyright: ignore[reportUnreachable]
 
 if TYPE_CHECKING:
-    from rlic._typing import AnyBoundary, Boundary, BoundaryDict, BoundaryPair
+    from ._typing import AnyBoundary, Boundary, BoundaryDict, BoundaryPair
 
 
-# boundaries that can be combined with another value on the opposite side
+# Boundaries that can be combined with another value on the opposite side.
 COMBO_ALLOWED_BOUNDS = frozenset({"closed"})
-# boundaries that require the exact same value be used on the opposite side
+# Boundaries that require identical values on both sides.
 COMBO_DISALLOWED_BOUNDS = frozenset({"periodic"})
 
 SUPPORTED_BOUNDS = frozenset(COMBO_ALLOWED_BOUNDS | COMBO_DISALLOWED_BOUNDS)
@@ -36,7 +38,7 @@ def as_pair(b: AnyBoundary, /) -> BoundaryPair:
         case (str(b1), str(b2)):
             return (b1, b2)
         case _ as unreachable:  # pyright: ignore[reportUnnecessaryComparison]
-            assert_never(unreachable)  # type: ignore
+            assert_never(unreachable)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -46,8 +48,7 @@ class BoundarySet:
 
     @staticmethod
     def from_user_input(bounds: Boundary | BoundaryDict, /) -> BoundarySet | None:
-        # this function is responsible for validating the keys in a dict input, but
-        # lets through any str as keys. It should output a very predictable structure.
+        # Validate dict-like inputs while allowing shorthand strings.
         match bounds:
             case str() as b:
                 return BoundarySet(x=as_pair(b), y=as_pair(b))  # type: ignore[arg-type]
@@ -57,11 +58,9 @@ class BoundarySet:
             } if len(bounds) == 2:
                 return BoundarySet(x=as_pair(bx), y=as_pair(by))
             case _:
-                # signal an invalid input
                 return None
 
     def collect_exceptions(self) -> list[Exception]:
-        # this function is responsible for invalidating unsupported keys (or combos)
         msg_unknown = "Unknown {side} {ax} boundary {name!r}"
         msg_invalid_combo = (
             "{side} {ax} boundary {name!r} cannot be combined with "
@@ -74,8 +73,6 @@ class BoundarySet:
                 continue
 
             if {left, right}.issubset(SUPPORTED_BOUNDS):
-                # intentionally only report on disallowed combos
-                # if both bounds are known (avoid over-reporting for simple typos)
                 if left == right:
                     continue
                 if left in COMBO_DISALLOWED_BOUNDS:

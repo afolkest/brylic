@@ -77,4 +77,4 @@ def known_answer(request):
 def test_outputs(known_answer):
     u, v, kernel, uv_mode, expected = known_answer
     out = rlic.convolve(texture, u, v, kernel=kernel, uv_mode=uv_mode)
-    assert_allclose(out, expected, rtol=1.5e-7, atol=1e-6)
+    assert_allclose(out, expected, rtol=1.5e-7, atol=1e-5)

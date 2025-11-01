@@ -1,6 +1,6 @@
 # bryLIC
 
-This fork builds on the lovely [rLIC](https://github.com/neutrinoceros/rlic) project by neutrinoceros. 
+This fork builds on the lovely [rLIC](https://github.com/neutrinoceros/rlic) project by @neutrinoceros.
 Kudos to him.
 
 ## What is this?

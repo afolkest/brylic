@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-__all__ = ["convolve"]
+"""Python wrapper for the bryLIC experimental kernels."""
+
+__all__ = ["convolve", "tiled_convolve"]
 
 import sys
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from rlic._boundaries import BoundarySet
-from rlic._core import convolve_f32, convolve_f64
+from ._boundaries import BoundarySet
+from ._core import convolve_f32, convolve_f64
+from ._typing import Boundary, BoundaryDict, BoundaryPair, UVMode
 
 if sys.version_info < (3, 11):
     from exceptiongroup import ExceptionGroup  # pyright: ignore[reportUnreachable]
@@ -20,8 +23,6 @@ if TYPE_CHECKING:
     from numpy import dtype, ndarray
     from numpy import float32 as f32
     from numpy import float64 as f64
-
-    from rlic._typing import Boundary, BoundaryDict, BoundaryPair, UVMode
 
     F = TypeVar("F", f32, f64)
 
@@ -42,93 +43,17 @@ def convolve(
     uv_mode: UVMode = "velocity",
     boundaries: Boundary | BoundaryDict = "closed",
     iterations: int = 1,
+    mask: ndarray[tuple[int, int], dtype[np.bool_]] | None = None,
+    edge_gain_strength: float = 0.0,
+    edge_gain_power: float = 2.0,
+    tile_shape: tuple[int, int] | None = None,
+    overlap: int | None = None,
+    num_threads: int | None = None,
 ) -> ndarray[tuple[int, int], dtype[F]]:
     """2-dimensional line integral convolution.
 
-    Apply Line Integral Convolution to a texture array, against a 2D flow (u, v)
-    and via a 1D kernel.
-
-    Arguments
-    ---------
-    texture: 2D numpy array, positional-only
-      Think of this as a tracer fluid. Random noise is a good input in the
-      general case.
-
-    u, v: 2D numpy arrays
-      Represent the horizontal and vertical components of a vector field,
-      respectively.
-
-    kernel: 1D numpy array, keyword-only
-      This is the convolution kernel. Think of it as relative weights along a
-      portion of a field line. The first half of the array represent weights on
-      the "past" part of a field line (with respect to a starting point), while
-      the second line represents weights on the "future" part.
-
-    uv_mode: 'velocity' (default), or 'polarization', keyword-only
-      By default, the vector (u, v) field is assumed to be velocity-like, i.e.,
-      its direction matters. With uv_mode='polarization', direction is
-      effectively ignored.
-
-    boundaries: 'closed' (default), 'periodic', or a dict with keys 'x' and 'y',
-      and values are either of these strings, or 2-tuples (left, right) thereof.
-      This controls what boundary conditions are applied during streamline
-      integration. It is possible to specify left and right boundaries
-      independently along either directions, where x and y are the directions
-      parallel to the u and v vector field components, respectively.
-      A single string is also accepted as a shorthand for setting all boundaries
-      to the same type.
-      A 'periodic' boundary can only be combined with an identical one on
-      the opposite side.
-
-      .. versionadded: 0.5.0
-
-    iterations: (positive) int (default: 1), keyword-only
-      Perform multiple iterations in a loop where the output array texture is
-      fed back as the input to the next iteration. Looping is done at the
-      native-code level.
-
-    Returns
-    -------
-    2D numpy array
-      The convolved texture. The dtype of the output array is the same as the
-      input arrays. The value returned is always a newly allocated array, even
-      with `iterations=0`, in which case a copy of `texture` will be returned.
-
-    Raises
-    ------
-    TypeError
-      If input arrays' dtypes are mismatched.
-    ValueError:
-      If non-sensical or unknown values are received.
-    ExceptionGroup:
-      If more than a single exception is detected, they'll all be raised as
-      an exception group.
-
-    Notes
-    -----
-    All input arrays must have the same dtype, which can be either float32 or
-    float64.
-
-    Maximum performance is expected for C order arrays.
-
-    With a kernel.size < 5, uv_mode='polarization' is effectively equivalent to
-    uv_mode='velocity'. However, this is still a valid use case, so, no warning
-    is emitted.
-
-    It is recommended (but not required) to use odd-sized kernels, so that
-    forward and backward passes are balanced.
-
-    Kernels cannot contain non-finite (infinite or NaN) values. Although
-    unusual, negative values are allowed.
-
-    No effort is made to avoid propagation of NaNs from the input texture.
-    However, streamlines will be terminated whenever a pixel where either u or v
-    contains a NaN is encountered.
-
-    Infinite values in any input array are not special cased.
-
-    This function is guaranteed to never mutate any input array, and always
-    returns a newly allocated array. Thread-safety is thus trivially guaranteed.
+    This is a direct copy of the production wrapper so experiments can start
+    from known-good behavior before layering additional logic.
     """
     exceptions: list[Exception] = []
     if iterations < 0:
@@ -218,16 +143,86 @@ def convolve(
             ndarray[tuple[int], dtype[F]],
             tuple[BoundaryPair, BoundaryPair],
             int,
+            ndarray[tuple[int, int], dtype[np.bool_]] | None,
+            F,
+            F,
+            tuple[int, int] | None,
+            int | None,
+            int | None,
         ],
         ndarray[tuple[int, int], dtype[F]],
     ]
-    # about type: and pyright: comments:
-    # https://github.com/numpy/numpy/issues/28572
     if input_dtype == np.dtype("float32"):
         retf = convolve_f32  # type: ignore[assignment] # pyright: ignore[reportAssignmentType]
     elif input_dtype == np.dtype("float64"):
         retf = convolve_f64  # type: ignore[assignment] # pyright: ignore[reportAssignmentType]
-    else:
+    else:  # pragma: no cover - should be impossible due to validation above
         raise RuntimeError
 
-    return retf(texture, (u, v, uv_mode), kernel, (bs.x, bs.y), iterations)
+    try:
+        return retf(
+            texture,
+            (u, v, uv_mode),
+            kernel,
+            (bs.x, bs.y),
+            iterations,
+            mask,
+            edge_gain_strength,  # coerced to F by pyo3
+            edge_gain_power,
+            tile_shape,
+            overlap,
+            num_threads,
+        )
+    except TypeError:
+        # Older build without mask support: fall back to no-mask call.
+        retf_nomask: Callable[
+            [
+                ndarray[tuple[int, int], dtype[F]],
+                tuple[
+                    ndarray[tuple[int, int], dtype[F]],
+                    ndarray[tuple[int, int], dtype[F]],
+                    UVMode,
+                ],
+                ndarray[tuple[int], dtype[F]],
+                tuple[BoundaryPair, BoundaryPair],
+                int,
+            ],
+            ndarray[tuple[int, int], dtype[F]],
+        ] = retf  # type: ignore[assignment]
+        return retf_nomask(texture, (u, v, uv_mode), kernel, (bs.x, bs.y), iterations)
+
+
+def tiled_convolve(
+    texture: ndarray[tuple[int, int], dtype[F]],
+    /,
+    u: ndarray[tuple[int, int], dtype[F]],
+    v: ndarray[tuple[int, int], dtype[F]],
+    *,
+    kernel: ndarray[tuple[int], dtype[F]],
+    uv_mode: UVMode = "velocity",
+    boundaries: Boundary | BoundaryDict = "closed",
+    iterations: int = 1,
+    mask: ndarray[tuple[int, int], dtype[np.bool_]] | None = None,
+    edge_gain_strength: float = 0.0,
+    edge_gain_power: float = 2.0,
+    tile_shape: tuple[int, int] | None = (512, 512),
+    overlap: int | None = None,
+    num_threads: int | None = None,
+) -> ndarray[tuple[int, int], dtype[F]]:
+    """Convenience wrapper that enables tiling parameters by default."""
+
+    return convolve(
+        texture,
+        u,
+        v,
+        kernel=kernel,
+        uv_mode=uv_mode,
+        boundaries=boundaries,
+        iterations=iterations,
+        mask=mask,
+        edge_gain_strength=edge_gain_strength,
+        edge_gain_power=edge_gain_power,
+        tile_shape=tile_shape,
+        overlap=overlap,
+        num_threads=num_threads,
+    )

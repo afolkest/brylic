@@ -1,6 +1,10 @@
+"""Type aliases mirroring the production rLIC package."""
+
 __all__ = [
     "Boundary",
     "UVMode",
+    "BoundaryDict",
+    "BoundaryPair",
 ]
 
 from typing import Literal, TypeAlias, TypedDict
