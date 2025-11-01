@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.testing import assert_allclose
 
-from rlic import convolve, tiled_convolve
+from brylic import convolve, tiled_convolve
 
 DEFAULT_STREAMLENGTH_FACTOR = 60.0 / 1024.0
 

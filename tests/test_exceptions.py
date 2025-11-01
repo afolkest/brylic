@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from pytest import RaisesExc, RaisesGroup
 
-import rlic
+import brylic
 
 img = u = v = np.eye(64)
 kernel = np.linspace(0, 1, 10, dtype="float64")

@@ -4,7 +4,7 @@ from itertools import permutations, product
 import pytest
 from pytest import RaisesExc, RaisesGroup
 
-from rlic._boundaries import (
+from brylic._boundaries import (
     COMBO_ALLOWED_BOUNDS,
     COMBO_DISALLOWED_BOUNDS,
     SUPPORTED_BOUNDS,

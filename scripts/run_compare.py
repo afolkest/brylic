@@ -39,7 +39,7 @@ import rlic as vanilla_rlic
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
-import rlic as brylic  # Local version is also called 'rlic' but we alias it as brylic
+import brylic
 
 # Roughly mirrors FlowCol defaults for comparable aesthetics.
 DEFAULT_STREAMLENGTH_FACTOR = 60.0 / 1024.0

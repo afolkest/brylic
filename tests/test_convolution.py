@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal, assert_array_less
 
-import rlic
+import brylic
 
 prng = np.random.default_rng(0)
 

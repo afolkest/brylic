@@ -4,5 +4,3 @@ Pillow>=10.0
 
 # Optional, but improves noise resampling for run_compare.py:
 scipy>=1.11
-numba
-pyamg

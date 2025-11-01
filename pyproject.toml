@@ -1,8 +1,8 @@
 [project]
-name = "rlic"
+name = "brylic"
 # keep version in sync with Cargo.toml
 version = "0.5.1"
-description = "A minimal Line Integral Convolution extension for NumPy, written in Rust"
+description = "A boundary-aware Line Integral Convolution extension for NumPy, written in Rust"
 license = "MIT"
 license-files = [
     "LICENSE_rlic",
@@ -41,8 +41,8 @@ file = "README.md"
 content-type = "text/markdown"
 
 [project.urls]
-Homepage = "https://github.com/neutrinoceros/rlic"
-Changelog = "https://github.com/neutrinoceros/rlic/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/afolkest/brylic"
+Changelog = "https://github.com/afolkest/brylic/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
@@ -79,8 +79,8 @@ default-groups = [
 vectorplot = { git = "https://github.com/neutrinoceros/scikits-vectorplot", rev = "7477c801c9bfaa1bbb8084aad0b2dab7065f79d0" }  # v0.2.0post2
 
 [tool.maturin]
-module-name = "rlic._core"
-python-packages = ["rlic"]
+module-name = "brylic._core"
+python-packages = ["brylic"]
 python-source = "src"
 exclude = [
     "scratch/*",

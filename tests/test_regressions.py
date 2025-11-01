@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-import rlic
+import brylic
 
 pytest.importorskip("vectorplot")
 from vectorplot.lic_internal import (  # noqa: E402
