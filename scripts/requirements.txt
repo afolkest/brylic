@@ -1,0 +1,8 @@
+# Minimal dependencies for the helper scripts in this repository.
+numpy>=1.22
+Pillow>=10.0
+
+# Optional, but improves noise resampling for run_compare.py:
+scipy>=1.11
+numba
+pyamg

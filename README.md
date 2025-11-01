@@ -12,3 +12,9 @@ further algorithmic adjustments near the boundary for dials letting you construc
 aesthetically appealing "halos" around the boundaries. 
 
 This repo is heavily vibecoded and currently completely unstable so approach with caution.
+
+## Scripts
+
+Utility scripts live under `scripts/`. Install the minimal extras with
+`pip install -r scripts/requirements.txt`, then invoke them directly
+(e.g. `python scripts/run_compare.py`).
