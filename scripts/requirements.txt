@@ -2,5 +2,8 @@
 numpy>=1.22
 Pillow>=10.0
 
+# Original rlic for baseline comparison in run_compare.py:
+rlic
+
 # Optional, but improves noise resampling for run_compare.py:
 scipy>=1.11

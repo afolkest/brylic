@@ -18,10 +18,13 @@ import sys
 import time
 from pathlib import Path
 from statistics import mean
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from PIL import Image
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 try:  # Optional – improves noise filtering and resampling.
     from scipy.ndimage import gaussian_filter, zoom
@@ -83,18 +86,18 @@ def _generate_noise(
     if oversample > 1.0:
         if zoom is not None:
             scale_y = height / base.shape[0]
-            scale_x = width / base.shape[1]
+            scale_x = width / base.shape[1]  # type: ignore[misc]
             base = zoom(base, (scale_y, scale_x), order=1)
         else:  # fallback: simple cropping
             base = base[:height, :width]
 
-    base_min = float(base.min())
-    base_max = float(base.max())
+    base_min = float(base.min())  # type: ignore[attr-defined]
+    base_max = float(base.max())  # type: ignore[attr-defined]
     if base_max > base_min:
         base = (base - base_min) / (base_max - base_min)
     else:
         base = np.zeros_like(base)
-    return base.astype(np.float32)
+    return base.astype(np.float32)  # type: ignore[attr-defined]
 
 
 def _cosine_kernel(streamlength: int) -> np.ndarray:
@@ -152,13 +155,13 @@ def measure_once(
     *,
     uv_mode: UVMode = "velocity",
     iterations: int = DEFAULT_RENDER_PASSES,
-    boundaries: object = "closed",
+    boundaries: Literal["closed", "periodic"] = "closed",
     edge_gain_strength: float = 0.08,
     edge_gain_power: float = 2.0,
     tile_shape: tuple[int, int] | None = (512, 512),
     overlap: int | None = None,
     num_threads: int | None = None,
-) -> dict[str, float | bool]:
+) -> dict[str, Any]:
     texture, u, v, kernel = _make_test_case(shape, uv_mode=uv_mode, field="radial")
     mask = _circular_mask(shape)
 
@@ -260,14 +263,14 @@ def print_metrics(shape: tuple[int, int], metrics: dict[str, float | bool]) -> N
 
 
 def _locked_display_panels(
-    panels: dict[str, np.ndarray],
+    panels: dict[str, NDArray[Any]],
     order: list[str],
     *,
     clip_percent: float = 1.5,
     contrast: float = 1.5,
-    mask: np.ndarray | None = None,
+    mask: NDArray[Any] | None = None,
     edge_display_boost: float = 1.0,
-) -> list[np.ndarray]:
+) -> list[NDArray[Any]]:
     """Normalize multiple panels using baseline percentiles."""
     if "baseline" not in panels:
         raise ValueError("panels dictionary must include a 'baseline' entry.")
@@ -472,10 +475,10 @@ def main() -> None:
         demo_mask = _circular_mask(last_shape)
         panels = _locked_display_panels(
             {
-                "baseline": last_baseline_arr,
-                "experimental": last_experimental_arr,
-                "tiled": last_tiled_arr,
-                "experimental_gain": last_experimental_gain_arr,
+                "baseline": last_baseline_arr,  # type: ignore[dict-item]
+                "experimental": last_experimental_arr,  # type: ignore[dict-item]
+                "tiled": last_tiled_arr,  # type: ignore[dict-item]
+                "experimental_gain": last_experimental_gain_arr,  # type: ignore[dict-item]
             },
             order=["baseline", "experimental", "tiled", "experimental_gain"],
             clip_percent=1.5,
