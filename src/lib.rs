@@ -374,8 +374,9 @@ fn compute_pixel<T: AtLeastF32>(
     y: usize,
     x: usize,
 ) -> T {
-    let mut value = kernel[[kmid]].mul_add(input[[y, x]], 0.0.into());
-    let mut used_sum: T = kernel[[kmid]];
+    let center_weight = kernel[[kmid]];
+    let mut value = center_weight.mul_add(input[[y, x]], 0.0.into());
+    let mut used_sum: T = center_weight;
 
     let starting_point = PixelCoordinates {
         x,
@@ -407,20 +408,39 @@ fn compute_pixel<T: AtLeastF32>(
     value += acc_bwd;
     used_sum += used_bwd;
 
-    if let Some(_) = blocked {
-        if used_sum > 0.0.into() && used_sum < full_sum {
-            value = (full_sum / used_sum) * value;
-        }
-        if edge_gain_strength > 0.0.into() && full_sum > 0.0.into() {
-            let mut t = (full_sum - used_sum) / full_sum;
-            if t < 0.0.into() {
-                t = 0.0.into();
+    if let Some(mask) = blocked {
+        if !mask[[y, x]] && used_sum > center_weight {
+            let zero: T = 0.0.into();
+            let one: T = 1.0.into();
+            let denom = full_sum - center_weight;
+            let mut support_ratio = if denom > zero {
+                (used_sum - center_weight) / denom
+            } else {
+                zero
+            };
+            if support_ratio < zero {
+                support_ratio = zero;
             }
-            if t > 1.0.into() {
-                t = 1.0.into();
+            if support_ratio > one {
+                support_ratio = one;
             }
-            let gain = <T as num_traits::One>::one() + edge_gain_strength * t.powf(edge_gain_power);
-            value = gain * value;
+            if used_sum > zero && used_sum < full_sum {
+                let scale = full_sum / used_sum;
+                let renorm = (scale - one).mul_add(support_ratio, one);
+                value = renorm * value;
+            }
+            if edge_gain_strength > zero && full_sum > zero {
+                let mut t = (full_sum - used_sum) / full_sum;
+                if t < zero {
+                    t = zero;
+                }
+                if t > one {
+                    t = one;
+                }
+                let gain =
+                    one + edge_gain_strength * t.powf(edge_gain_power) * support_ratio;
+                value = gain * value;
+            }
         }
     }
 
