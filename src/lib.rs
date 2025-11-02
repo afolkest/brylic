@@ -465,10 +465,8 @@ fn compute_pixel<T: AtLeastF32>(
                 support_factor = one;
             }
 
-            if support_factor > zero && used_sum > zero && used_sum < full_sum {
-                let scale = full_sum / used_sum;
-                let renorm = (scale - one).mul_add(support_factor, one);
-                value = renorm * value;
+            if used_sum > zero && used_sum < full_sum {
+                value = (full_sum / used_sum) * value;
             }
             if edge_gain_strength > zero && full_sum > zero && support_factor > zero {
                 let mut t = (full_sum - used_sum) / full_sum;

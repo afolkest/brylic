@@ -171,13 +171,13 @@ def maybe_plot(
     result_vanilla: np.ndarray,
     result_vanilla_masked: np.ndarray,
     result_nomask_raw: np.ndarray,
-    result_nomask_gain: np.ndarray,
+    result_mask_nogain: np.ndarray,
     result_masked: np.ndarray,
 ) -> None:
     results = [
         texture,
         result_nomask_raw,
-        result_nomask_gain,
+        result_mask_nogain,
         result_masked,
         result_vanilla,
         result_vanilla_masked,
@@ -206,17 +206,17 @@ def maybe_plot(
     axes[0, 0].axis("off")
 
     axes[0, 1].imshow(result_nomask_raw, cmap="gray", vmin=global_min, vmax=global_max)
-    axes[0, 1].set_title("No mask (raw)")
+    axes[0, 1].set_title("Raw")
     axes[0, 1].axis("off")
 
     axes[0, 2].imshow(
-        result_nomask_gain, cmap="gray", vmin=global_min, vmax=global_max
+        result_mask_nogain, cmap="gray", vmin=global_min, vmax=global_max
     )
-    axes[0, 2].set_title("No mask (edge gain)")
+    axes[0, 2].set_title("Mask, no edge gain gain")
     axes[0, 2].axis("off")
 
     axes[0, 3].imshow(result_masked, cmap="gray", vmin=global_min, vmax=global_max)
-    axes[0, 3].set_title("With mask")
+    axes[0, 3].set_title("Mask, edge gain")
     axes[0, 3].axis("off")
 
     axes[1, 0].imshow(result_vanilla, cmap="gray", vmin=global_min, vmax=global_max)
