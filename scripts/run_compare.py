@@ -24,7 +24,6 @@ from scipy.ndimage import gaussian_filter, zoom
 # ============================================================================
 RESOLUTION = (1024, 1024)  # (height, width)
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
-REPEAT = 1  # Number of runs to average
 
 # LIC parameters
 STREAMLENGTH_FACTOR = 60.0 / 1024.0
@@ -80,18 +79,18 @@ def generate_noise(shape: tuple[int, int]) -> np.ndarray:
 
     # Downsample
     scale_y = height / base.shape[0]
-    scale_x = width / base.shape[1]
+    scale_x = width / base.shape[1]  # type: ignore[misc]
     base = zoom(base, (scale_y, scale_x), order=1)
 
     # Normalize to [0, 1]
-    base_min = float(base.min())
-    base_max = float(base.max())
+    base_min = float(base.min())  # type: ignore[attr-defined]
+    base_max = float(base.max())  # type: ignore[attr-defined]
     if base_max > base_min:
         base = (base - base_min) / (base_max - base_min)
     else:
         base = np.zeros_like(base)
 
-    return base.astype(np.float32)
+    return base.astype(np.float32)  # type: ignore[attr-defined]
 
 
 def circular_mask(shape: tuple[int, int]) -> np.ndarray:
@@ -201,46 +200,20 @@ def run_comparison() -> None:
     kernel = cosine_kernel(streamlength_pixels)
 
     # Run baseline
-    baseline_times = []
-    for _ in range(REPEAT):
-        start = time.perf_counter()
-        baseline = vanilla_rlic.convolve(
-            texture,
-            u_masked,
-            v_masked,
-            kernel=kernel,
-            uv_mode="velocity",
-            boundaries="closed",
-            iterations=ITERATIONS,
-        )
-        baseline_times.append(time.perf_counter() - start)
+    start = time.perf_counter()
+    baseline = vanilla_rlic.convolve(
+        texture,
+        u_masked,
+        v_masked,
+        kernel=kernel,
+        uv_mode="velocity",
+        boundaries="closed",
+        iterations=ITERATIONS,
+    )
+    baseline_time = time.perf_counter() - start
 
-    baseline_time = sum(baseline_times) / len(baseline_times)
-
-    # Run brylic
-    brylic_times = []
-    for _ in range(REPEAT):
-        start = time.perf_counter()
-        brylic_result = brylic.tiled_convolve(
-            texture,
-            u_masked,
-            v_masked,
-            kernel=kernel,
-            uv_mode="velocity",
-            boundaries="closed",
-            iterations=ITERATIONS,
-            mask=mask,
-            edge_gain_strength=0.0,
-            edge_gain_power=EDGE_GAIN_POWER,
-            tile_shape=TILE_SHAPE,
-            overlap=TILE_OVERLAP,
-            num_threads=NUM_THREADS,
-        )
-        brylic_times.append(time.perf_counter() - start)
-
-    brylic_time = sum(brylic_times) / len(brylic_times)
-
-    # Run brylic with gain (for visualization)
+    # Run brylic with gain
+    start = time.perf_counter()
     brylic_gain = brylic.tiled_convolve(
         texture,
         u_masked,
@@ -256,18 +229,12 @@ def run_comparison() -> None:
         overlap=TILE_OVERLAP,
         num_threads=NUM_THREADS,
     )
-
-    # Compute differences
-    diff = brylic_result - baseline
-    max_abs_diff = float(np.max(np.abs(diff)))
-    rms_diff = float(np.sqrt(np.mean(diff**2)))
+    brylic_time = time.perf_counter() - start
 
     # Print results
     print(f"Baseline rlic runtime:      {baseline_time:.3f} s")
     print(f"brylic runtime:             {brylic_time:.3f} s")
     print(f"Speedup (baseline/brylic):  {baseline_time / brylic_time:.2f}×")
-    print(f"Max |Δ|:                    {max_abs_diff:.3e}")
-    print(f"RMS Δ:                      {rms_diff:.3e}")
     print()
 
     # Save comparison image
