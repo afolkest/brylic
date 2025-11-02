@@ -28,7 +28,7 @@ import rlic as vanilla_rlic
 # --------------------------------------------------------------------------- #
 RESOLUTION = (512, 512)  # (height, width)
 STREAM_LENGTH = 40  # kernel half-width in pixels
-EDGE_GAIN_STRENGTH = 3.0
+EDGE_GAIN_STRENGTH = 5.0
 EDGE_GAIN_POWER = 1.0
 ITERATIONS = 2
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
@@ -114,7 +114,7 @@ def main() -> None:
         iterations=ITERATIONS,
         edge_gain_strength=0.0,
         edge_gain_power=EDGE_GAIN_POWER,
-        mask=None,
+        mask=None
     )
 
     print("Running convolution without mask...")
@@ -126,7 +126,7 @@ def main() -> None:
         iterations=ITERATIONS,
         edge_gain_strength=0.0,
         edge_gain_power=EDGE_GAIN_POWER,
-        mask=mask,
+        mask=mask
     )
 
     print("Running convolution with mask awareness...")

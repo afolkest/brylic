@@ -24,21 +24,6 @@ impl UVMode {
     }
 }
 
-#[derive(Clone, Copy)]
-enum EdgeSupportMode {
-    Average,
-    Symmetric,
-}
-impl EdgeSupportMode {
-    fn new(mode: &str) -> EdgeSupportMode {
-        match mode {
-            "average" => EdgeSupportMode::Average,
-            "symmetric" => EdgeSupportMode::Symmetric,
-            _ => panic!("unknown edge_support_mode"),
-        }
-    }
-}
-
 #[derive(Clone)]
 struct UVField<'a, T> {
     u: ArrayView2<'a, T>,
@@ -386,7 +371,6 @@ fn compute_pixel<T: AtLeastF32>(
     full_sum: T,
     edge_gain_strength: T,
     edge_gain_power: T,
-    edge_support_mode: EdgeSupportMode,
     y: usize,
     x: usize,
 ) -> T {
@@ -438,26 +422,12 @@ fn compute_pixel<T: AtLeastF32>(
         if !mask[[y, x]] && used_sum > center_weight {
             let zero: T = 0.0.into();
             let one: T = 1.0.into();
-            let support_factor = match edge_support_mode {
-                EdgeSupportMode::Average => {
-                    let denom = full_sum - center_weight;
-                    if denom > zero {
-                        (used_sum - center_weight) / denom
-                    } else {
-                        zero
-                    }
-                }
-                EdgeSupportMode::Symmetric => {
-                    let two: T = 2.0.into();
-                    let half_sum = (full_sum - center_weight) / two;
-                    if half_sum > zero {
-                        used_fwd.min(used_bwd) / half_sum
-                    } else {
-                        zero
-                    }
-                }
+            let denom = full_sum - center_weight;
+            let mut support_factor = if denom > zero {
+                (used_sum - center_weight) / denom
+            } else {
+                zero
             };
-            let mut support_factor = support_factor;
             if support_factor < zero {
                 support_factor = zero;
             }
@@ -468,7 +438,7 @@ fn compute_pixel<T: AtLeastF32>(
             if used_sum > zero && used_sum < full_sum {
                 value = (full_sum / used_sum) * value;
             }
-            if edge_gain_strength > zero && full_sum > zero && support_factor > zero {
+            if edge_gain_strength != zero && full_sum > zero && support_factor > zero {
                 let mut t = (full_sum - used_sum) / full_sum;
                 if t < zero {
                     t = zero;
@@ -526,7 +496,6 @@ fn convolve_tiles<T: AtLeastF32>(
     blocked: Option<ArrayView2<bool>>,
     edge_gain_strength: T,
     edge_gain_power: T,
-    edge_support_mode: EdgeSupportMode,
     tile_shape: Option<(usize, usize)>,
     num_threads: Option<usize>,
     output: &mut Array2<T>,
@@ -563,7 +532,6 @@ fn convolve_tiles<T: AtLeastF32>(
             let dims_ref = dims.clone();
             let blocked_ref = &blocked_owned;
             let results_ref = &results;
-            let edge_support_mode_ref = edge_support_mode;
             scope.spawn(move || {
                 let blocked_view = blocked_ref.as_ref().map(|arr| arr.view());
                 let mut local = Vec::with_capacity(chunk.len());
@@ -582,7 +550,6 @@ fn convolve_tiles<T: AtLeastF32>(
                                 full_sum,
                                 edge_gain_strength,
                                 edge_gain_power,
-                                edge_support_mode_ref,
                                 global_y,
                                 global_x,
                             );
@@ -615,7 +582,6 @@ fn convolve<'py, T: AtLeastF32>(
     blocked: Option<&ArrayView2<bool>>,
     edge_gain_strength: T,
     edge_gain_power: T,
-    edge_support_mode: EdgeSupportMode,
 ) {
     let dims = ImageDimensions {
         x: uv.u.shape()[1],
@@ -642,7 +608,6 @@ fn convolve<'py, T: AtLeastF32>(
                 full_sum,
                 edge_gain_strength,
                 edge_gain_power,
-                edge_support_mode,
                 i,
                 j,
             );
@@ -660,7 +625,6 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
     blocked: Option<PyReadonlyArray2<'py, bool>>,
     edge_gain_strength: T,
     edge_gain_power: T,
-    edge_support_mode: Option<&str>,
     tile_shape: Option<(usize, usize)>,
     _overlap: Option<usize>,
     num_threads: Option<usize>,
@@ -676,9 +640,6 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
         Array2::from_shape_vec(texture.raw_dim(), texture.iter().cloned().collect()).unwrap();
     let mut output = Array2::<T>::zeros(texture.raw_dim());
     let blocked_owned = blocked.map(|b| b.as_array().to_owned());
-    let edge_support_mode = edge_support_mode
-        .map(EdgeSupportMode::new)
-        .unwrap_or(EdgeSupportMode::Average);
     let dims = ImageDimensions {
         x: input.shape()[1],
         y: input.shape()[0],
@@ -709,7 +670,6 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
                 blocked_view,
                 edge_gain_strength,
                 edge_gain_power,
-                edge_support_mode,
                 Some(shape),
                 num_threads,
                 &mut output,
@@ -724,7 +684,6 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
                 blocked_view.as_ref(),
                 edge_gain_strength,
                 edge_gain_power,
-                edge_support_mode,
             );
         }
         it_count += 1;
@@ -744,7 +703,7 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
 fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
     #[pyo3(name = "convolve_f32")]
-    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, edge_support_mode="average", tile_shape=None, overlap=None, num_threads=None))]
+    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
     fn convolve_f32_py<'py>(
         py: Python<'py>,
         texture: PyReadonlyArray2<'py, f32>,
@@ -759,7 +718,6 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
         blocked: Option<PyReadonlyArray2<'py, bool>>,
         edge_gain_strength: f32,
         edge_gain_power: f32,
-        edge_support_mode: &str,
         tile_shape: Option<(usize, usize)>,
         overlap: Option<usize>,
         num_threads: Option<usize>,
@@ -775,7 +733,6 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
             blocked,
             edge_gain_strength,
             edge_gain_power,
-            Some(edge_support_mode),
             tile_shape,
             overlap,
             num_threads,
@@ -784,7 +741,7 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
 
     #[pyfn(m)]
     #[pyo3(name = "convolve_f64")]
-    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, edge_support_mode="average", tile_shape=None, overlap=None, num_threads=None))]
+    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
     fn convolve_f64_py<'py>(
         py: Python<'py>,
         texture: PyReadonlyArray2<'py, f64>,
@@ -799,7 +756,6 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
         blocked: Option<PyReadonlyArray2<'py, bool>>,
         edge_gain_strength: f64,
         edge_gain_power: f64,
-        edge_support_mode: &str,
         tile_shape: Option<(usize, usize)>,
         overlap: Option<usize>,
         num_threads: Option<usize>,
@@ -815,7 +771,6 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
             blocked,
             edge_gain_strength,
             edge_gain_power,
-            Some(edge_support_mode),
             tile_shape,
             overlap,
             num_threads,
