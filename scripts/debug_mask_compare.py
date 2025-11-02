@@ -28,7 +28,7 @@ import rlic as vanilla_rlic
 # --------------------------------------------------------------------------- #
 RESOLUTION = (512, 512)  # (height, width)
 STREAM_LENGTH = 40  # kernel half-width in pixels
-EDGE_GAIN_STRENGTH = 0.6
+EDGE_GAIN_STRENGTH = 3.0
 EDGE_GAIN_POWER = 1.0
 ITERATIONS = 2
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
@@ -118,15 +118,15 @@ def main() -> None:
     )
 
     print("Running convolution without mask...")
-    result_nomask = brylic.convolve(
+    result_mask_nogain = brylic.convolve( #stupid name, with maksk
         texture,
         u,
         v,
         kernel=kernel,
         iterations=ITERATIONS,
-        edge_gain_strength=EDGE_GAIN_STRENGTH,
+        edge_gain_strength=0.0,
         edge_gain_power=EDGE_GAIN_POWER,
-        mask=None,
+        mask=mask,
     )
 
     print("Running convolution with mask awareness...")
@@ -149,7 +149,7 @@ def main() -> None:
         vanilla=result_vanilla,
         vanilla_masked=result_vanilla_masked,
         nomask_raw=result_nomask_raw,
-        nomask_gain=result_nomask,
+        nomask_gain=result_mask_nogain,
         masked=result_masked,
     )
     print(f"Saved raw arrays to {bundle_path}")
@@ -160,7 +160,7 @@ def main() -> None:
         result_vanilla,
         result_vanilla_masked,
         result_nomask_raw,
-        result_nomask,
+        result_mask_nogain,
         result_masked,
     )
 
@@ -174,6 +174,17 @@ def maybe_plot(
     result_nomask_gain: np.ndarray,
     result_masked: np.ndarray,
 ) -> None:
+    results = [
+        texture,
+        result_nomask_raw,
+        result_nomask_gain,
+        result_masked,
+        result_vanilla,
+        result_vanilla_masked,
+    ]
+    global_min = min(float(arr.min()) for arr in results)
+    global_max = max(float(arr.max()) for arr in results)
+
     output_dir = OUTPUT_DIR  # local alias
     mpl_dir = output_dir / "mpl_config"
     fontcache_dir = output_dir / "fontcache"
@@ -187,29 +198,10 @@ def maybe_plot(
         print(f"Skipping matplotlib figure ({exc})")
         return
 
-    global_min = float(
-        min(
-            result_vanilla.min(),
-            result_vanilla_masked.min(),
-            result_nomask_raw.min(),
-            result_nomask_gain.min(),
-            result_masked.min(),
-        )
-    )
-    global_max = float(
-        max(
-            result_vanilla.max(),
-            result_vanilla_masked.max(),
-            result_nomask_raw.max(),
-            result_nomask_gain.max(),
-            result_masked.max(),
-        )
-    )
-
     fig, axes = plt.subplots(2, 4, figsize=(16, 8), constrained_layout=True)
     axes = np.atleast_2d(axes)
 
-    axes[0, 0].imshow(texture, cmap="gray", vmin=0.0, vmax=1.0)
+    axes[0, 0].imshow(texture, cmap="gray", vmin=global_min, vmax=global_max)
     axes[0, 0].set_title("Input noise")
     axes[0, 0].axis("off")
 
@@ -217,7 +209,9 @@ def maybe_plot(
     axes[0, 1].set_title("No mask (raw)")
     axes[0, 1].axis("off")
 
-    axes[0, 2].imshow(result_nomask_gain, cmap="gray", vmin=global_min, vmax=global_max)
+    axes[0, 2].imshow(
+        result_nomask_gain, cmap="gray", vmin=global_min, vmax=global_max
+    )
     axes[0, 2].set_title("No mask (edge gain)")
     axes[0, 2].axis("off")
 
@@ -229,7 +223,9 @@ def maybe_plot(
     axes[1, 0].set_title("Vanilla rlic")
     axes[1, 0].axis("off")
 
-    axes[1, 1].imshow(result_vanilla_masked, cmap="gray", vmin=global_min, vmax=global_max)
+    axes[1, 1].imshow(
+        result_vanilla_masked, cmap="gray", vmin=global_min, vmax=global_max
+    )
     axes[1, 1].set_title("Vanilla rlic (flow masked)")
     axes[1, 1].axis("off")
 

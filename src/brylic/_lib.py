@@ -46,6 +46,7 @@ def convolve(
     mask: ndarray[tuple[int, int], dtype[np.bool_]] | None = None,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
+    edge_support_mode: str = "average",
     tile_shape: tuple[int, int] | None = None,
     overlap: int | None = None,
     num_threads: int | None = None,
@@ -146,6 +147,7 @@ def convolve(
             ndarray[tuple[int, int], dtype[np.bool_]] | None,
             F,
             F,
+            str,
             tuple[int, int] | None,
             int | None,
             int | None,
@@ -169,6 +171,7 @@ def convolve(
             mask,
             edge_gain_strength,  # coerced to F by pyo3
             edge_gain_power,
+            edge_support_mode,
             tile_shape,
             overlap,
             num_threads,
@@ -183,12 +186,12 @@ def convolve(
                     ndarray[tuple[int, int], dtype[F]],
                     UVMode,
                 ],
-                ndarray[tuple[int], dtype[F]],
-                tuple[BoundaryPair, BoundaryPair],
-                int,
-            ],
-            ndarray[tuple[int, int], dtype[F]],
-        ] = retf  # type: ignore[assignment]
+            ndarray[tuple[int], dtype[F]],
+            tuple[BoundaryPair, BoundaryPair],
+            int,
+        ],
+        ndarray[tuple[int, int], dtype[F]],
+    ] = retf  # type: ignore[assignment]
         return retf_nomask(texture, (u, v, uv_mode), kernel, (bs.x, bs.y), iterations)
 
 
@@ -205,6 +208,7 @@ def tiled_convolve(
     mask: ndarray[tuple[int, int], dtype[np.bool_]] | None = None,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
+    edge_support_mode: str = "average",
     tile_shape: tuple[int, int] | None = (512, 512),
     overlap: int | None = None,
     num_threads: int | None = None,
@@ -222,6 +226,7 @@ def tiled_convolve(
         mask=mask,
         edge_gain_strength=edge_gain_strength,
         edge_gain_power=edge_gain_power,
+        edge_support_mode=edge_support_mode,
         tile_shape=tile_shape,
         overlap=overlap,
         num_threads=num_threads,
