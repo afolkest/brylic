@@ -49,22 +49,36 @@ struct PixelCoordinates {
     dimensions: ImageDimensions,
 }
 impl PixelCoordinates {
-    fn apply_one_dir(c: &mut usize, image_size: usize, boundaries: &BoundaryPair) {
+    fn apply_one_dir(c: &mut usize, image_size: usize, boundaries: &BoundaryPair) -> bool {
         if *c == usize::MAX {
-            *c = match boundaries.left {
-                Boundary::Closed => 0,
-                Boundary::Periodic => image_size - 1,
+            match boundaries.left {
+                Boundary::Closed => {
+                    *c = 0;
+                    return true; // Hit closed boundary
+                }
+                Boundary::Periodic => {
+                    *c = image_size - 1;
+                    return false; // Wrapped, not a true edge hit
+                }
             };
         } else if *c == image_size {
-            *c = match boundaries.right {
-                Boundary::Closed => image_size - 1,
-                Boundary::Periodic => 0,
+            match boundaries.right {
+                Boundary::Closed => {
+                    *c = image_size - 1;
+                    return true; // Hit closed boundary
+                }
+                Boundary::Periodic => {
+                    *c = 0;
+                    return false; // Wrapped, not a true edge hit
+                }
             };
         }
+        false
     }
-    fn apply(&mut self, boundaries: &BoundarySet) {
-        PixelCoordinates::apply_one_dir(&mut self.x, self.dimensions.x, &boundaries.x);
-        PixelCoordinates::apply_one_dir(&mut self.y, self.dimensions.y, &boundaries.y);
+    fn apply(&mut self, boundaries: &BoundarySet) -> bool {
+        let hit_x = PixelCoordinates::apply_one_dir(&mut self.x, self.dimensions.x, &boundaries.x);
+        let hit_y = PixelCoordinates::apply_one_dir(&mut self.y, self.dimensions.y, &boundaries.y);
+        hit_x || hit_y
     }
 }
 mod boundaries {
@@ -223,9 +237,9 @@ fn advance<T: AtLeastF32>(
     coords: &mut PixelCoordinates,
     pix_frac: &mut PixelFraction<T>,
     boundaries: &BoundarySet,
-) {
+) -> bool {
     if uv.u == 0.0.into() && uv.v == 0.0.into() {
-        return;
+        return false;
     }
 
     let tx = time_to_next_pixel(uv.u, pix_frac.x);
@@ -254,7 +268,8 @@ fn advance<T: AtLeastF32>(
     }
     // All boundary conditions must be applicable on each step.
     // This is done to allow for complex cases like shearing boxes.
-    coords.apply(boundaries);
+    // Returns true if a closed domain boundary was hit.
+    coords.apply(boundaries)
 }
 
 #[cfg(test)]
@@ -305,7 +320,7 @@ fn accumulate_direction<T: AtLeastF32>(
     boundaries: &BoundarySet,
     direction: &Direction,
     blocked: Option<&ArrayView2<bool>>,
-) -> (T, T) {
+) -> (T, T, bool) {
     let mut coords: PixelCoordinates = starting_point.clone();
     let mut pix_frac = PixelFraction {
         x: 0.5.into(),
@@ -320,6 +335,7 @@ fn accumulate_direction<T: AtLeastF32>(
     let kmid = kernel.len() / 2;
     let mut acc: T = 0.0.into();
     let mut used_sum: T = 0.0.into();
+    let mut hit_domain_edge = false;
     let range = match direction {
         Direction::Forward => Either::Right((kmid + 1)..kernel.len()),
         Direction::Backward => Either::Left((0..kmid).rev()),
@@ -346,7 +362,10 @@ fn accumulate_direction<T: AtLeastF32>(
             Direction::Forward => p.clone(),
             Direction::Backward => -p,
         };
-        advance(&mp, &mut coords, &mut pix_frac, boundaries);
+        let hit_edge = advance(&mp, &mut coords, &mut pix_frac, boundaries);
+        if hit_edge {
+            hit_domain_edge = true;
+        }
         // If a blocked mask is provided, stop when entering a blocked pixel.
         if let Some(b) = blocked {
             if b[[coords.y, coords.x]] {
@@ -357,7 +376,7 @@ fn accumulate_direction<T: AtLeastF32>(
         acc = w.mul_add(select_pixel(input, &coords), acc);
         used_sum += w;
     }
-    (acc, used_sum)
+    (acc, used_sum, hit_domain_edge)
 }
 
 fn compute_pixel<T: AtLeastF32>(
@@ -371,6 +390,8 @@ fn compute_pixel<T: AtLeastF32>(
     full_sum: T,
     edge_gain_strength: T,
     edge_gain_power: T,
+    domain_edge_gain_strength: T,
+    domain_edge_gain_power: T,
     y: usize,
     x: usize,
 ) -> T {
@@ -383,7 +404,7 @@ fn compute_pixel<T: AtLeastF32>(
         dimensions: dims.clone(),
     };
 
-    let (acc_fwd, used_fwd) = accumulate_direction(
+    let (acc_fwd, used_fwd, hit_domain_fwd) = accumulate_direction(
         &starting_point,
         uv,
         kernel,
@@ -395,7 +416,7 @@ fn compute_pixel<T: AtLeastF32>(
     value += acc_fwd;
     used_sum += used_fwd;
 
-    let (acc_bwd, used_bwd) = accumulate_direction(
+    let (acc_bwd, used_bwd, hit_domain_bwd) = accumulate_direction(
         &starting_point,
         uv,
         kernel,
@@ -407,6 +428,9 @@ fn compute_pixel<T: AtLeastF32>(
     value += acc_bwd;
     used_sum += used_bwd;
 
+    let hit_domain_edge = hit_domain_fwd || hit_domain_bwd;
+
+    // Apply mask-based edge gain
     if let Some(_) = blocked {
         if used_sum > 0.0.into() && used_sum < full_sum {
             value = (full_sum / used_sum) * value;
@@ -420,6 +444,21 @@ fn compute_pixel<T: AtLeastF32>(
                 t = 1.0.into();
             }
             let gain = <T as num_traits::One>::one() + edge_gain_strength * t.powf(edge_gain_power);
+            value = gain * value;
+        }
+    }
+
+    // Apply domain boundary edge gain
+    if hit_domain_edge && domain_edge_gain_strength > 0.0.into() && full_sum > 0.0.into() {
+        if used_sum > 0.0.into() && used_sum < full_sum {
+            let mut t = (full_sum - used_sum) / full_sum;
+            if t < 0.0.into() {
+                t = 0.0.into();
+            }
+            if t > 1.0.into() {
+                t = 1.0.into();
+            }
+            let gain = <T as num_traits::One>::one() + domain_edge_gain_strength * t.powf(domain_edge_gain_power);
             value = gain * value;
         }
     }
@@ -467,6 +506,8 @@ fn convolve_tiles<T: AtLeastF32>(
     blocked: Option<ArrayView2<bool>>,
     edge_gain_strength: T,
     edge_gain_power: T,
+    domain_edge_gain_strength: T,
+    domain_edge_gain_power: T,
     tile_shape: Option<(usize, usize)>,
     num_threads: Option<usize>,
     output: &mut Array2<T>,
@@ -521,6 +562,8 @@ fn convolve_tiles<T: AtLeastF32>(
                                 full_sum,
                                 edge_gain_strength,
                                 edge_gain_power,
+                                domain_edge_gain_strength,
+                                domain_edge_gain_power,
                                 global_y,
                                 global_x,
                             );
@@ -553,6 +596,8 @@ fn convolve<'py, T: AtLeastF32>(
     blocked: Option<&ArrayView2<bool>>,
     edge_gain_strength: T,
     edge_gain_power: T,
+    domain_edge_gain_strength: T,
+    domain_edge_gain_power: T,
 ) {
     let dims = ImageDimensions {
         x: uv.u.shape()[1],
@@ -579,6 +624,8 @@ fn convolve<'py, T: AtLeastF32>(
                 full_sum,
                 edge_gain_strength,
                 edge_gain_power,
+                domain_edge_gain_strength,
+                domain_edge_gain_power,
                 i,
                 j,
             );
@@ -596,6 +643,8 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
     blocked: Option<PyReadonlyArray2<'py, bool>>,
     edge_gain_strength: T,
     edge_gain_power: T,
+    domain_edge_gain_strength: T,
+    domain_edge_gain_power: T,
     tile_shape: Option<(usize, usize)>,
     _overlap: Option<usize>,
     num_threads: Option<usize>,
@@ -641,6 +690,8 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
                 blocked_view,
                 edge_gain_strength,
                 edge_gain_power,
+                domain_edge_gain_strength,
+                domain_edge_gain_power,
                 Some(shape),
                 num_threads,
                 &mut output,
@@ -655,6 +706,8 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
                 blocked_view.as_ref(),
                 edge_gain_strength,
                 edge_gain_power,
+                domain_edge_gain_strength,
+                domain_edge_gain_power,
             );
         }
         it_count += 1;
@@ -674,7 +727,7 @@ fn convolve_iteratively<'py, T: AtLeastF32 + numpy::Element>(
 fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
     #[pyo3(name = "convolve_f32")]
-    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
+    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, domain_edge_gain_strength=0.0, domain_edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
     fn convolve_f32_py<'py>(
         py: Python<'py>,
         texture: PyReadonlyArray2<'py, f32>,
@@ -689,6 +742,8 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
         blocked: Option<PyReadonlyArray2<'py, bool>>,
         edge_gain_strength: f32,
         edge_gain_power: f32,
+        domain_edge_gain_strength: f32,
+        domain_edge_gain_power: f32,
         tile_shape: Option<(usize, usize)>,
         overlap: Option<usize>,
         num_threads: Option<usize>,
@@ -704,6 +759,8 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
             blocked,
             edge_gain_strength,
             edge_gain_power,
+            domain_edge_gain_strength,
+            domain_edge_gain_power,
             tile_shape,
             overlap,
             num_threads,
@@ -712,7 +769,7 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
 
     #[pyfn(m)]
     #[pyo3(name = "convolve_f64")]
-    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
+    #[pyo3(signature = (texture, uv, kernel, boundaries, iterations, blocked=None, edge_gain_strength=0.0, edge_gain_power=2.0, domain_edge_gain_strength=0.0, domain_edge_gain_power=2.0, tile_shape=None, overlap=None, num_threads=None))]
     fn convolve_f64_py<'py>(
         py: Python<'py>,
         texture: PyReadonlyArray2<'py, f64>,
@@ -727,6 +784,8 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
         blocked: Option<PyReadonlyArray2<'py, bool>>,
         edge_gain_strength: f64,
         edge_gain_power: f64,
+        domain_edge_gain_strength: f64,
+        domain_edge_gain_power: f64,
         tile_shape: Option<(usize, usize)>,
         overlap: Option<usize>,
         num_threads: Option<usize>,
@@ -742,6 +801,8 @@ fn _core<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
             blocked,
             edge_gain_strength,
             edge_gain_power,
+            domain_edge_gain_strength,
+            domain_edge_gain_power,
             tile_shape,
             overlap,
             num_threads,
