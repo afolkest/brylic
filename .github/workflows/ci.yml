@@ -185,7 +185,7 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
       with:
-        name: rlic_coverage_data-${{matrix.os}}-${{matrix.python-version}}-${{matrix.label}}
+        name: brylic_coverage_data-${{matrix.os}}-${{matrix.python-version}}-${{matrix.label}}
         path: .coverage.*
         if-no-files-found: ignore
         include-hidden-files: true
@@ -246,7 +246,7 @@ jobs:
 
     - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
       with:
-        pattern: rlic_coverage_data-*
+        pattern: brylic_coverage_data-*
         merge-multiple: true
 
     - name: Check coverage
@@ -260,7 +260,7 @@ jobs:
     - name: Upload HTML report if check failed.
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
       with:
-        name: rlic_coverage_report
+        name: brylic_coverage_report
         path: htmlcov
       if: ${{ failure() }}
 
@@ -316,10 +316,10 @@ jobs:
       run: uv run --no-sync pyright src
 
     #- name: Verify Types (pyright)
-    #  run: uv run --no-sync pyright --verifytypes rlic
+    #  run: uv run --no-sync pyright --verifytypes brylic
 
     - name: Typecheck (basedpyright)
       run: uv run --no-sync basedpyright src
 
     #- name: Verify Types (basedpyright)
-    #  run: uv run --no-sync basedpyright --verifytypes rlic
+    #  run: uv run --no-sync basedpyright --verifytypes brylic

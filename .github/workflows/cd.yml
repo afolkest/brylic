@@ -69,7 +69,7 @@ jobs:
     - name: test source distribution in isolation
       run: |
         tar xzf dist/*.tar.gz
-        cd rlic-*
+        cd brylic-*
         uv pip install .
         uv run --no-project pytest --color=yes -ra
 
@@ -124,7 +124,7 @@ jobs:
       run: |
         uv sync --only-group test
         uv pip install numpy
-        uv pip install rlic --no-index --find-links dist --no-deps
+        uv pip install brylic --no-index --find-links dist --no-deps
         uv run --no-sync pytest --color=yes
     - name: Upload wheels
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -163,7 +163,7 @@ jobs:
       run: |
         uv sync --only-group test
         uv pip install numpy
-        uv pip install rlic --no-index --find-links dist --no-deps
+        uv pip install brylic --no-index --find-links dist --no-deps
         uv run --no-sync pytest --color=yes
     - name: Upload wheels
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -199,7 +199,7 @@ jobs:
       run: |
         uv sync --only-group test
         uv pip install numpy
-        uv pip install rlic --no-index --find-links dist --no-deps
+        uv pip install brylic --no-index --find-links dist --no-deps
         uv run --no-sync pytest --color=yes
     - name: Upload wheels
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -239,7 +239,7 @@ jobs:
       run: |
         uv sync --only-group test
         uv pip install numpy
-        uv pip install rlic --no-index --find-links dist --no-deps
+        uv pip install brylic --no-index --find-links dist --no-deps
         uv run --no-sync pytest --color=yes
     - name: Upload wheels
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -289,7 +289,7 @@ jobs:
     - musllinux
     environment:
       name: pypi
-      url: https://pypi.org/p/rlic
+      url: https://pypi.org/p/brylic
     permissions:
       id-token: write
 
