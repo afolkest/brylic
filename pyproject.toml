@@ -1,7 +1,7 @@
 [project]
 name = "brylic"
 # keep version in sync with Cargo.toml
-version = "0.5.1"
+version = "0.1.0"
 description = "A boundary-aware Line Integral Convolution extension for NumPy, written in Rust"
 license = "MIT"
 license-files = [
@@ -9,7 +9,7 @@ license-files = [
     "LICENSE_vectorplot",
 ]
 authors = [
-    { name = "C.M.T. Robert" },
+    { name = "Aasmund Folkestad", email = "asmund_sf@hotmail.com" },
 ]
 classifiers = [
     "Intended Audience :: Science/Research",

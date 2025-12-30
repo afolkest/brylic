@@ -14,4 +14,13 @@ target/
 
 # Virtual environments
 .venv
+venv/
 rlic-speedups
+
+# OS files
+.DS_Store
+
+# Local dev files
+docs/
+scripts/compare_full_vs_tiled.py
+scripts/python_tile_benchmark.py
