@@ -26,7 +26,7 @@ logger.remove()
 logger.add(sys.stderr, colorize=True, format="<level>{level:<5} {message}</level>")
 
 REV_REGEXP = re.compile(
-    r"(?P<prefix>https://raw\.githubusercontent\.com/neutrinoceros/rlic/)[^/]*(?P<suffix>.*)",
+    r"(?P<prefix>https://raw\.githubusercontent\.com/afolkest/brylic/)[^/]*(?P<suffix>.*)",
 )
 STABLE_VER_REGEXP = re.compile(r"^\d+\.*\d+\.\d+$")
 STABLE_TAG_REGEXP = re.compile(r"^v\d+\.*\d+\.\d+$")

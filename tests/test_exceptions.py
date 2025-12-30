@@ -16,7 +16,7 @@ def test_invalid_iterations():
             r"Expected a strictly positive integer\.$"
         ),
     ):
-        rlic.convolve(img, u, v, kernel=kernel, iterations=-1)
+        brylic.convolve(img, u, v, kernel=kernel, iterations=-1)
 
 
 def test_invalid_uv_mode():
@@ -27,7 +27,7 @@ def test_invalid_uv_mode():
             r"Expected one of \['velocity', 'polarization'\]$"
         ),
     ):
-        rlic.convolve(img, u, v, kernel=kernel, uv_mode="astral")
+        brylic.convolve(img, u, v, kernel=kernel, uv_mode="astral")
 
 
 def test_invalid_texture_ndim():
@@ -49,7 +49,7 @@ def test_invalid_texture_ndim():
         ),
         match=r"^Invalid inputs were received\.",
     ):
-        rlic.convolve(img, u, v, kernel=kernel)
+        brylic.convolve(img, u, v, kernel=kernel)
 
 
 def test_invalid_texture_shape_and_ndim():
@@ -72,7 +72,7 @@ def test_invalid_texture_shape_and_ndim():
         ),
         match=r"^Invalid inputs were received\.",
     ):
-        rlic.convolve(img, u, v, kernel=kernel)
+        brylic.convolve(img, u, v, kernel=kernel)
 
 
 def test_invalid_texture_values():
@@ -84,7 +84,7 @@ def test_invalid_texture_values():
             r"Expected only positive values\.$"
         ),
     ):
-        rlic.convolve(img, v, v, kernel=kernel)
+        brylic.convolve(img, v, v, kernel=kernel)
 
 
 @pytest.mark.parametrize(
@@ -109,7 +109,7 @@ def test_mismatched_shapes(texture_shape, u_shape, v_shape):
             rf"v.shape=\({v.shape[0]}, {v.shape[1]}\)$"
         ),
     ):
-        rlic.convolve(texture, u, v, kernel=kernel)
+        brylic.convolve(texture, u, v, kernel=kernel)
 
 
 def test_invalid_kernel_ndim():
@@ -120,7 +120,7 @@ def test_invalid_kernel_ndim():
             r"Got kernel\.ndim=2$"
         ),
     ):
-        rlic.convolve(img, u, v, kernel=np.ones((5, 5)))
+        brylic.convolve(img, u, v, kernel=np.ones((5, 5)))
 
 
 @pytest.mark.parametrize("polluting_value", [-np.inf, np.inf, np.nan])
@@ -131,7 +131,7 @@ def test_non_finite_kernel(polluting_value):
         ValueError,
         match=r"^Found non-finite value\(s\) in kernel\.$",
     ):
-        rlic.convolve(img, u, v, kernel=kernel)
+        brylic.convolve(img, u, v, kernel=kernel)
 
 
 def test_invalid_texture_dtype():
@@ -150,7 +150,7 @@ def test_invalid_texture_dtype():
         RaisesExc(TypeError, match=r"^Data types mismatch"),
         match=r"^Invalid inputs were received\.",
     ):
-        rlic.convolve(img, u, v, kernel=kernel)
+        brylic.convolve(img, u, v, kernel=kernel)
 
 
 def test_invalid_kernel_dtype():
@@ -168,7 +168,7 @@ def test_invalid_kernel_dtype():
         RaisesExc(TypeError, match=r"^Data types mismatch"),
         match=r"^Invalid inputs were received\.",
     ):
-        rlic.convolve(img, u, v, kernel=-np.ones(5, dtype="complex128"))
+        brylic.convolve(img, u, v, kernel=-np.ones(5, dtype="complex128"))
 
 
 def test_mismatched_dtypes():
@@ -183,7 +183,7 @@ def test_mismatched_dtypes():
             r"v\.dtype=dtype\('float64'\), kernel\.dtype=dtype\('float64'\)$"
         ),
     ):
-        rlic.convolve(img, u, v, kernel=kernel)
+        brylic.convolve(img, u, v, kernel=kernel)
 
 
 def test_all_validators_before_returns():
@@ -194,9 +194,9 @@ def test_all_validators_before_returns():
         ValueError,
         match=r"^Found non-finite value\(s\) in kernel\.$",
     ):
-        rlic.convolve(img, u, v, kernel=kernel, iterations=0)
+        brylic.convolve(img, u, v, kernel=kernel, iterations=0)
 
 
 def test_invalid_boundary_type():
     with pytest.raises(TypeError, match=r"^Invalid boundary specification "):
-        rlic.convolve(img, u, v, kernel=kernel, boundaries=None)
+        brylic.convolve(img, u, v, kernel=kernel, boundaries=None)
