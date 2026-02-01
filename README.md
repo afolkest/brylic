@@ -11,7 +11,13 @@ contains various adjustments to avoid aliasing caused by boundary effects and
 further algorithmic adjustments near the boundary for dials letting you construct 
 aesthetically appealing "halos" around the boundaries. 
 
-This repo is heavily vibecoded and currently completely unstable so approach with caution.
+## Better alterntive on Apple Silicon
+
+Claude and I have now implemented a GPU version of LIC (including the special boundary treatment in this repo)
+in Metal + Swift. Capable of real-time 30fps at 4K resolation on M1 Silicon Pro. If you are on
+Apple Silicon and want very high performance, you might prefer it:
+
+[https://github.com/afolkest/metal-LIC](https://github.com/afolkest/metal-LIC)
 
 ## Scripts
 
